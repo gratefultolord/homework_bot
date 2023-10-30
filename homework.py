@@ -18,6 +18,7 @@ TELEGRAM_TOKEN = os.getenv('SECRET_TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('SECRET_CHAT_ID')
 
 RETRY_PERIOD = 600
+RETRY_PERIOD_IN_SECS = RETRY_PERIOD
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -45,9 +46,11 @@ def send_message(bot, message):
     """Отправляет сообщение в Telegram чат."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
+    except telegram.error.TelegramError as telegram_error:
+        logger.exception('Ошибка при отправке сообщения в Telegram: %s',
+                         telegram_error)
+    else:
         logger.debug('Сообщение успешно отправлено в Telegram')
-    except Exception as e:
-        logger.error(f'Ошибка при отправке сообщения: {e}')
 
 
 def get_api_answer(timestamp):
@@ -57,13 +60,15 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(**params_dict)
         response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        logger.error(f'Ошибка при запросе к API: {e}')
-    else:
-        if response.status_code != HTTPStatus.OK:
-            raise ResponseCodeError(f'Запрос к API '
-                                    f'вернул код {response.status_code}')
-        return response.json()
+    except requests.exceptions.RequestException as request_exception:
+        raise request_exception(f'Ошибка при запросе к API: '
+                                f'{request_exception}')
+    if response.status_code != HTTPStatus.OK:
+        raise ResponseCodeError(f'Запрос к API вернул код '
+                                f'{response.status_code}.\n'
+                                f'Адрес запроса: {params_dict["url"]}\n'
+                                f'Параметры запроса: {params_dict["params"]}')
+    return response.json()
 
 
 def check_response(response: dict):
@@ -103,8 +108,8 @@ def main():
             if not check_response(api_response):
                 continue
             homeworks = api_response.get('homeworks', [])
-            if homeworks:
-                message = parse_status(homeworks[0])
+            for homework in homeworks:
+                message = parse_status(homework)
                 if message is not None:
                     send_message(bot, message)
             timestamp = api_response.get('current_date', timestamp)
@@ -113,7 +118,7 @@ def main():
             logger.error(message)
             send_message(bot, message)
         finally:
-            time.sleep(RETRY_PERIOD)
+            time.sleep(RETRY_PERIOD_IN_SECS)
 
 
 if __name__ == '__main__':
