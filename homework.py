@@ -5,7 +5,9 @@ import time
 from http import HTTPStatus
 
 import requests
+from requests.exceptions import RequestException
 import telegram
+from telegram.error import TelegramError
 from dotenv import load_dotenv
 
 from exceptions import ResponseCodeError
@@ -47,8 +49,8 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
     except telegram.error.TelegramError as telegram_error:
-        logger.exception('Ошибка при отправке сообщения в Telegram: %s',
-                         telegram_error)
+        raise TelegramError(f'Ошибка при отправке сообщения в Telegram: '
+                            f'{telegram_error}')
     else:
         logger.debug('Сообщение успешно отправлено в Telegram')
 
@@ -60,9 +62,9 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(**params_dict)
         response.raise_for_status()
-    except requests.exceptions.RequestException as request_exception:
-        raise request_exception(f'Ошибка при запросе к API: '
-                                f'{request_exception}')
+    except requests.error.RequestException as request_exception:
+        raise RequestException(f'Ошибка при запросе к API: '
+                               f'{request_exception}') from request_exception
     if response.status_code != HTTPStatus.OK:
         raise ResponseCodeError(f'Запрос к API вернул код '
                                 f'{response.status_code}.\n'
@@ -115,7 +117,7 @@ def main():
             timestamp = api_response.get('current_date', timestamp)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
-            logger.error(message)
+            logger.exception(message)
             send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD_IN_SECS)
